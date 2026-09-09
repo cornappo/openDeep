@@ -48,7 +48,6 @@ app.get('/api/suggerimenti', (req, res) => {
     ]);
 });
 
-// Endpoint unificato: crea subito il task nel DB e restituisce il token
 app.post('/api/avvia-task', async (req, res) => {
     const tokenTask = 'task_' + Date.now();
     try {
@@ -63,7 +62,6 @@ app.post('/api/avvia-task', async (req, res) => {
     }
 });
 
-// Endpoint per controllare lo stato e avviare l'elaborazione se non partita
 app.post('/api/controlla-stato', async (req, res) => {
     const { tokenTask, payloadUtente, fileAllegato } = req.body;
     
@@ -74,7 +72,6 @@ app.post('/api/controlla-stato', async (req, res) => {
     try {
         let checkRes = await pool.query('SELECT * FROM tasks_log WHERE token_task = $1', [tokenTask]);
         
-        // Se per qualsiasi motivo il token non esiste, lo creiamo al volo
         if (checkRes.rows.length === 0) {
             await pool.query(
                 `INSERT INTO tasks_log (token_task, stato, log, risultato) VALUES ($1, $2, $3, $4) ON CONFLICT (token_task) DO NOTHING`,
@@ -85,7 +82,6 @@ app.post('/api/controlla-stato', async (req, res) => {
 
         let currentTask = checkRes.rows[0];
 
-        // Se il task è IN_CORSO e non ha ancora avviato la chiamata o completato, eseguiamo DeepSeek in background
         if (currentTask.stato === 'IN_CORSO' && !currentTask.risultato) {
             await pool.query(`UPDATE tasks_log SET log = array_append(log, 'Elaborazione richiesta in corso...') WHERE token_task = $1`, [tokenTask]);
 
@@ -104,7 +100,6 @@ app.post('/api/controlla-stato', async (req, res) => {
                 });
         }
 
-        // Rileggiamo lo stato aggiornato
         const finalRes = await pool.query('SELECT * FROM tasks_log WHERE token_task = $1', [tokenTask]);
         const taskAggiornato = finalRes.rows[0] || currentTask;
 
@@ -123,7 +118,7 @@ app.post('/api/controlla-stato', async (req, res) => {
 async function EseguiChiamataDeepSeek(inputUtente, fileInfo) {
     const apiKeyDeepSeek = process.env.DEEPSEEK_API_KEY;
     if (!apiKeyDeepSeek) {
-        throw new Error("Chiave API DeepSeek non configurata nelle variabili d'ambiente di Render.");
+        throw new Error("Chiave API DeepSeek non configurata nelle variabili d'ambiente.");
     }
 
     let testoCompletoInput = inputUtente || "";
