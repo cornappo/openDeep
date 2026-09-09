@@ -35,7 +35,7 @@
         }
 
         aside {
-            width: 260px;
+            width: 280px;
             background-color: var(--sidebar-bg);
             border-right: 1px solid var(--border-color);
             display: flex;
@@ -80,6 +80,18 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-top: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .add-project-icon {
+            cursor: pointer;
+            font-size: 16px;
+            color: var(--text-secondary);
+        }
+        .add-project-icon:hover {
+            color: var(--text-color);
         }
 
         .history-list, .project-list {
@@ -87,7 +99,7 @@
             flex-direction: column;
             gap: 4px;
             overflow-y: auto;
-            flex: 1;
+            max-height: 180px;
         }
 
         .history-item, .project-btn {
@@ -116,6 +128,23 @@
             border-left: 3px solid var(--accent-color);
         }
 
+        .attachments-section {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            background: var(--panel-bg);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        .attachment-item {
+            font-size: 12px;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
         .export-btn {
             background-color: transparent;
             border: 1px solid var(--border-color);
@@ -127,6 +156,7 @@
             text-align: center;
             text-decoration: none;
             transition: all 0.2s;
+            margin-top: auto;
         }
 
         .export-btn:hover {
@@ -211,6 +241,36 @@
             color: var(--text-color);
         }
 
+        /* Area Chip Dinamici */
+        .chips-container {
+            display: flex;
+            gap: 8px;
+            padding: 0 24px 12px 24px;
+            max-width: 760px;
+            margin: 0 auto;
+            width: 100%;
+            flex-wrap: wrap;
+        }
+
+        .chip {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .chip:hover {
+            border-color: var(--accent-color);
+            background-color: rgba(217, 119, 6, 0.1);
+        }
+
         .input-area {
             padding: 20px;
             max-width: 760px;
@@ -239,12 +299,6 @@
             outline: none;
             max-height: 150px;
             padding: 4px 0;
-        }
-
-        .input-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }
 
         .attach-btn, .send-btn {
@@ -285,11 +339,19 @@
             Nuova chat
         </button>
 
-        <div class="sidebar-section-title">Contesti / Progetti</div>
-        <div class="project-list">
+        <div class="sidebar-section-title">
+            <span>Contesti / Progetti</span>
+            <span class="add-project-icon" onclick="creaNuovoProgettoPrompt()" title="Aggiungi nuovo progetto">+</span>
+        </div>
+        <div class="project-list" id="projectList">
             <button class="project-btn active" onclick="cambiaProgetto('Studio Architettura')">Studio Architettura</button>
             <button class="project-btn" onclick="cambiaProgetto('Prato & Orto Naturale')">Prato & Orto Naturale</button>
             <button class="project-btn" onclick="cambiaProgetto('Investimenti Tech')">Investimenti Tech</button>
+        </div>
+
+        <div class="sidebar-section-title">Allegati Progetto</div>
+        <div class="attachments-section" id="attachmentsSection">
+            <div class="attachment-item"><span>Nessun file allegato</span></div>
         </div>
 
         <div class="sidebar-section-title">Conversazioni Recenti</div>
@@ -315,9 +377,15 @@
             </div>
         </div>
 
+        <!-- Area Chip Dinamici -->
+        <div class="chips-container" id="chipsContainer">
+            <div class="chip" onclick="promuoviAProgettoDinamico()">💡 Salva chat come Progetto</div>
+            <div class="chip" onclick="triggerAllegato()">📎 Allega Documento / File</div>
+        </div>
+
         <div class="input-area">
             <div class="input-box">
-                <button class="attach-btn" title="Allega file o documenti" onclick="alert('Funzione allegati pronta.')">
+                <button class="attach-btn" title="Allega file o documenti" onclick="triggerAllegato()">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
                 </button>
                 <textarea id="userInput" rows="1" placeholder="Scrivi un messaggio..." onkeydown="gestisciInvio(event)"></textarea>
@@ -328,8 +396,15 @@
         </div>
     </main>
 
+    <input type="file" id="fileInput" style="display:none" onchange="gestisciFileCaricato(event)">
+
     <script>
         let progettoCorrente = 'Studio Architettura';
+        let allegatiPerProgetto = {
+            'Studio Architettura': ['Planimetria_VialeVenezia.pdf'],
+            'Prato & Orto Naturale': [],
+            'Investimenti Tech': []
+        };
 
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('collapsed');
@@ -340,7 +415,6 @@
             document.getElementById('headerTitle').innerText = nomeProgetto;
             document.getElementById('exportLink').href = `/api/export-txt?progetto=${encodeURIComponent(nomeProgetto)}`;
             
-            // Aggiorna classe active ai bottoni progetto
             document.querySelectorAll('.project-btn').forEach(btn => {
                 if (btn.innerText === nomeProgetto) {
                     btn.classList.add('active');
@@ -349,10 +423,74 @@
                 }
             });
 
-            // Pulisce e avvia una nuova sessione pulita per il progetto selezionato
+            aggiornaListaAllegati();
+
             document.getElementById('chatContainer').innerHTML = `
                 <div class="message assistant">Contesto attivo impostato su: <strong>${nomeProgetto}</strong>. Come procediamo?</div>
             `;
+        }
+
+        function creaNuovoProgettoPrompt() {
+            const nome = prompt("Nome del nuovo progetto/contesto:");
+            if (!nome || !nome.trim()) return;
+            aggiungiProgettoDinamico(nome.trim());
+        }
+
+        function aggiungiProgettoDinamico(nome) {
+            const projectList = document.getElementById('projectList');
+            
+            const esiste = Array.from(projectList.getElementsByClassName('project-btn')).some(b => b.innerText === nome);
+            if (esiste) {
+                cambiaProgetto(nome);
+                return;
+            }
+
+            if (!allegatiPerProgetto[nome]) {
+                allegatiPerProgetto[nome] = [];
+            }
+
+            const btn = document.createElement('button');
+            btn.className = 'project-btn';
+            btn.innerText = nome;
+            btn.onclick = () => cambiaProgetto(nome);
+            projectList.appendChild(btn);
+            cambiaProgetto(nome);
+        }
+
+        function promuoviAProgettoDinamico() {
+            const suggerito = prompt("Inserisci il nome del nuovo progetto basato su questa chat:", "Nuovo Progetto");
+            if (suggerito) {
+                aggiungiProgettoDinamico(suggerito);
+            }
+        }
+
+        function triggerAllegato() {
+            document.getElementById('fileInput').click();
+        }
+
+        function gestisciFileCaricato(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!allegatiPerProgetto[progettoCorrente]) {
+                allegatiPerProgetto[progettoCorrente] = [];
+            }
+            allegatiPerProgetto[progettoCorrente].push(file.name);
+            aggiornaListaAllegati();
+            
+            alert(`File "${file.name}" allegato con successo al progetto ${progettoCorrente}.`);
+        }
+
+        function aggiornaListaAllegati() {
+            const container = document.getElementById('attachmentsSection');
+            const files = allegatiPerProgetto[progettoCorrente] || [];
+            
+            if (files.length === 0) {
+                container.innerHTML = `<div class="attachment-item"><span>Nessun file allegato</span></div>`;
+                return;
+            }
+
+            container.innerHTML = files.map(f => `<div class="attachment-item"><span>📄 ${f}</span></div>`).join('');
         }
 
         function nuovaConversazione() {
@@ -363,7 +501,6 @@
 
         function caricaChatStorica(titolo) {
             const chatContainer = document.getElementById('chatContainer');
-            // Pulisce la chat precedente prima di caricare lo storico selezionato
             chatContainer.innerHTML = `
                 <div class="message user">Richiesta ripristino storico: ${titolo}</div>
                 <div class="message assistant">Sessione ripristinata dal database per: <strong>${titolo}</strong>. La memoria e i dati associati sono pronti. Come desideri continuare?</div>
