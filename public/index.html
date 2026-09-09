@@ -474,24 +474,25 @@
             const testoCompleto = (testoUtente + " " + rispostaAI).toLowerCase();
             let nuoviChips = '';
 
-            // 1. Rileva se la conversazione corrisponde a un progetto esistente diverso da quello attuale
-            if (testoCompleto.includes('tech') || testoCompleto.includes('investiment') || testoCompleto.includes('semiconduttori')) {
-                if (progettoCorrente !== 'Investimenti Tech') {
-                    nuoviChips += `<div class="chip" onclick="spostaInProgettoEsistente('Investimenti Tech')">🔗 Unisci a "Investimenti Tech"</div>`;
-                }
-            } else if (testoCompleto.includes('orto') || testoCompleto.includes('prato') || testoCompleto.includes('piante')) {
-                if (progettoCorrente !== 'Prato & Orto Naturale') {
-                    nuoviChips += `<div class="chip" onclick="spostaInProgettoEsistente('Prato & Orto Naturale')">🔗 Unisci a "Prato & Orto Naturale"</div>`;
+            // Estrazione autonoma del contesto basata sulle parole chiave dell'utente
+            let nomeEstratto = "Nuovo Progetto";
+            if (testoCompleto.includes('topo') || testoCompleto.includes('topi')) {
+                nomeEstratto = "Progetto Topi";
+            } else if (testoCompleto.includes('mucca') || testoCompleto.includes('mucche')) {
+                nomeEstratto = "Progetto Mucche";
+            } else if (testoCompleto.includes('tech') || testoCompleto.includes('investimenti')) {
+                nomeEstratto = "Investimenti & Tech";
+            } else if (testoCompleto.includes('orto') || testoCompleto.includes('prato')) {
+                nomeEstratto = "Prato & Orto";
+            } else {
+                const parole = testoUtente.split(' ').filter(p => p.length > 3);
+                if (parole.length > 0) {
+                    nomeEstratto = "Progetto " + parole[0].charAt(0).toUpperCase() + parole[0].slice(1);
                 }
             }
 
-            // 2. Propone un nome specifico per un NUOVO progetto basato sulle parole chiave
-            let nomeProgettoSuggerito = "Nuovo Progetto Tech";
-            if (testoCompleto.includes('mouse') || testoCompleto.includes('hardware')) {
-                nomeProgettoSuggerito = "Hardware & Periferiche";
-            }
-
-            nuoviChips += `<div class="chip" onclick="aggiungiProgettoDinamico('${nomeProgettoSuggerito}')">💡 Salva come "${nomeProgettoSuggerito}"</div>`;
+            // Generazione dinamica dei chip basata sul contesto estratto
+            nuoviChips += `<div class="chip" onclick="aggiungiProgettoDinamico('${nomeEstratto}')">💡 Salva come "${nomeEstratto}"</div>`;
             nuoviChips += `<div class="chip" onclick="triggerAllegato()">📎 Allega File</div>`;
 
             chipsContainer.innerHTML = nuoviChips;
