@@ -36,7 +36,6 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Rotta Chat con log dettagliati per debuggare Supabase
 app.post('/api/chat', async (req, res) => {
     const { userId = 'utente_default_demo', progetto = 'Studio Architettura', messaggio } = req.body;
     const sessionKey = `${userId}_${progetto}`;
@@ -48,12 +47,10 @@ app.post('/api/chat', async (req, res) => {
     }
 
     try {
-        // 1. Leggi la memoria attuale da Supabase
         let memRes = await pool.query('SELECT memoria_testo FROM user_memories WHERE user_id = $1', [sessionKey]);
         let memoriaAttuale = memRes.rows[0]?.memoria_testo || "Nessuna informazione registrata per questo progetto.";
         console.log(`[MEMORIA LETTA] ${memoriaAttuale}`);
 
-        // 2. Chiamata a DeepSeek
         const messages = [
             { role: "system", content: "Sei Cervelletto Pro, un assistente strategico intelligente e pulito." },
             { role: "system", content: `MEMORIA PERSISTENTE ATTUALE:\n${memoriaAttuale}` },
@@ -74,7 +71,6 @@ app.post('/api/chat', async (req, res) => {
 
         let rispostaIA = aiData.choices[0].message.content;
 
-        // 3. Auto-aggiornamento memoria
         const promptMemoria = `Aggiorna la memoria del progetto basandoti sull'interazione.\nMEMORIA ATTUALE:\n${memoriaAttuale}\n\nULTIMO MESSAGGIO:\n"${messaggio}"\nRISPOSTA:\n"${rispostaIA}"\nRestituisci SOLO il testo della nuova memoria aggiornata.`;
 
         const memUpdateRes = await fetch("https://api.deepseek.com/chat/completions", {
@@ -90,7 +86,6 @@ app.post('/api/chat', async (req, res) => {
         const nuovaMemoria = memUpdateData.choices[0].message.content.trim();
         console.log(`[NUOVA MEMORIA GENERATA] ${nuovaMemoria}`);
 
-        // 4. Scrittura su Supabase
         await pool.query(
             `INSERT INTO user_memories (user_id, memoria_testo, updated_at) 
              VALUES ($1, $2, NOW()) 
@@ -108,7 +103,6 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
-// Avvio server immediato per evitare timeout di Render
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
     console.log(`Server avviato sulla porta ${PORT}`);
