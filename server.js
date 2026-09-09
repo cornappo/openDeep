@@ -1,110 +1,341 @@
-import express from 'express';
-import fetch from 'node-fetch';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import pkg from 'pg';
-const { Pool } = pkg;
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cervelletto Pro — Workspace</title>
+    <style>
+        :root {
+            --bg-color: #f8fafc;
+            --surface: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --border: #e2e8f0;
+            --pill-bg: #eff6ff;
+            --pill-text: #1e40af;
+        }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
 
-const app = express();
-app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
 
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
-});
+        /* Sidebar Progetti */
+        aside {
+            width: 300px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 1.5rem;
+        }
 
-async function initDatabase() {
-    try {
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS user_memories (
-                user_id VARCHAR(255) PRIMARY KEY,
-                memoria_testo TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-        console.log("[LOG DB] Tabella user_memories verificata con successo su Supabase.");
-    } catch (err) {
-        console.error("[LOG DB] Errore creazione tabella user_memories:", err.message);
-    }
-}
+        .brand {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
 
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+        .project-list {
+            list-style: none;
+            flex-grow: 1;
+            overflow-y: auto;
+        }
 
-app.post('/api/chat', async (req, res) => {
-    const { userId = 'utente_default_demo', progetto = 'Studio Architettura', messaggio } = req.body;
-    const sessionKey = `${userId}_${progetto}`;
+        .project-item {
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+            transition: all 0.2s;
+        }
 
-    console.log(`[CHAT] Ricevuto messaggio per sessione: ${sessionKey} -> "${messaggio}"`);
+        .project-item:hover, .project-item.active {
+            background: var(--bg-color);
+            color: var(--primary);
+            font-weight: 500;
+        }
 
-    if (!messaggio) {
-        return res.status(400).json({ errore: "Messaggio mancante." });
-    }
+        /* Area Principale */
+        main {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            background: var(--bg-color);
+        }
 
-    try {
-        let memRes = await pool.query('SELECT memoria_testo FROM user_memories WHERE user_id = $1', [sessionKey]);
-        let memoriaAttuale = memRes.rows[0]?.memoria_testo || "Nessuna informazione registrata per questo progetto.";
-        console.log(`[MEMORIA LETTA] ${memoriaAttuale}`);
+        header {
+            padding: 1rem 2rem;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
 
-        const messages = [
-            { role: "system", content: "Sei Cervelletto Pro, un assistente strategico intelligente e pulito." },
-            { role: "system", content: `MEMORIA PERSISTENTE ATTUALE:\n${memoriaAttuale}` },
-            { role: "user", content: messaggio }
-        ];
+        .zoom-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
 
-        const aiResponse = await fetch("https://api.deepseek.com/chat/completions", {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-            },
-            body: JSON.stringify({ model: "deepseek-chat", messages, temperature: 0.3 })
-        });
+        .btn-zoom {
+            background: transparent;
+            border: 1px solid var(--border);
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            color: var(--text-muted);
+        }
 
-        const aiData = await aiResponse.json();
-        if (!aiResponse.ok) throw new Error(JSON.stringify(aiData));
+        .btn-zoom.active {
+            background: var(--text-main);
+            color: white;
+            border-color: var(--text-main);
+        }
 
-        let rispostaIA = aiData.choices[0].message.content;
+        /* Chat / Contenuto Dinamico */
+        .chat-container {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            max-width: 900px;
+            width: 100%;
+            margin: 0 auto;
+        }
 
-        const promptMemoria = `Aggiorna la memoria del progetto basandoti sull'interazione.\nMEMORIA ATTUALE:\n${memoriaAttuale}\n\nULTIMO MESSAGGIO:\n"${messaggio}"\nRISPOSTA:\n"${rispostaIA}"\nRestituisci SOLO il testo della nuova memoria aggiornata.`;
+        .message {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 1.25rem;
+            border-radius: 8px;
+            line-height: 1.6;
+            font-size: 0.950rem;
+            white-space: pre-wrap;
+        }
 
-        const memUpdateRes = await fetch("https://api.deepseek.com/chat/completions", {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-            },
-            body: JSON.stringify({ model: "deepseek-chat", messages: [{ role: "user", content: promptMemoria }], temperature: 0.1 })
-        });
+        .message.assistant {
+            border-left: 4px solid var(--primary);
+        }
 
-        const memUpdateData = await memUpdateRes.json();
-        const nuovaMemoria = memUpdateData.choices[0].message.content.trim();
-        console.log(`[NUOVA MEMORIA GENERATA] ${nuovaMemoria}`);
+        /* Pillole Ipertestuali Guidate */
+        .pills-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
 
-        await pool.query(
-            `INSERT INTO user_memories (user_id, memoria_testo, updated_at) 
-             VALUES ($1, $2, NOW()) 
-             ON CONFLICT (user_id) 
-             DO UPDATE SET memoria_testo = $2, updated_at = NOW()`,
-            [sessionKey, nuovaMemoria]
-        );
-        console.log(`[DB SUCCESS] Memoria salvata correttamente su Supabase per ${sessionKey}`);
+        .pill {
+            background: var(--pill-bg);
+            color: var(--pill-text);
+            padding: 0.35rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: background 0.2s;
+        }
 
-        res.json({ risposta: rispostaIA, memoriaAggiornata: nuovaMemoria });
+        .pill:hover {
+            background: #dbeafe;
+        }
 
-    } catch (err) {
-        console.error("[LOG CHAT ERRORE]:", err);
-        res.status(500).json({ errore: "Errore interno: " + err.message });
-    }
-});
+        /* Input Area */
+        .input-area {
+            padding: 1.5rem 2rem;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 1rem;
+            max-width: 900px;
+            width: 100%;
+            margin: 0 auto;
+        }
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, async () => {
-    console.log(`Server avviato sulla porta ${PORT}`);
-    await initDatabase();
-});
+        textarea {
+            flex-grow: 1;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.75rem;
+            resize: none;
+            height: 50px;
+            outline: none;
+            font-size: 0.95rem;
+        }
+
+        textarea:focus {
+            border-color: var(--primary);
+        }
+
+        .btn-send {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 0 1.5rem;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-send:hover {
+            background: var(--primary-hover);
+        }
+
+        /* Modalità Zoom (Leggero vs Professionale) */
+        .mode-light .message {
+            font-size: 1.05rem;
+            color: #334155;
+        }
+        .mode-pro .message {
+            font-family: monospace;
+            font-size: 0.85rem;
+            background: #f1f5f9;
+        }
+    </style>
+</head>
+<body class="mode-light">
+
+    <aside>
+        <div class="brand">
+            <span>PROGETTI</span>
+            <button onclick="esportaMemoriaTXT()" style="font-size:0.75rem; cursor:pointer; padding:0.2rem 0.5rem;">Esporta TXT</button>
+        </div>
+        <ul class="project-list" id="projectList">
+            <li class="project-item active" onclick="selezionaProgetto('Studio Architettura', this)">Studio Architettura</li>
+            <li class="project-item" onclick="selezionaProgetto('Prato & Orto Naturale', this)">Prato & Orto Naturale</li>
+            <li class="project-item" onclick="selezionaProgetto('Investimenti Tech', this)">Investimenti Tech</li>
+        </ul>
+    </aside>
+
+    <main>
+        <header>
+            <div id="currentContextTitle" style="font-weight: 600; font-size: 0.95rem;">Contesto: Studio Architettura</div>
+            <div class="zoom-controls">
+                <button class="btn-zoom active" id="btnLight" onclick="setZoom('light')">Leggero</button>
+                <button class="btn-zoom" id="btnPro" onclick="setZoom('pro')">Professionale / Dati</button>
+            </div>
+        </header>
+
+        <div class="chat-container" id="chatContainer">
+            <div class="message assistant">
+                <p>Ben tornato nel contesto del tuo studio. Ho in memoria la configurazione e le ultime scelte fatte. Vuoi una tabella riassuntiva dello stato attuale o preferisci procedere con una nuova analisi?</p>
+                
+                <div class="pills-bar">
+                    <span class="pill" onclick="inviaPillola('Genera tabella riassuntiva dei task attivi')">📊 Tabella riassuntiva</span>
+                    <span class="pill" onclick="inviaPillola('Analizza i costi e ottimizza la cache')">⚡ Ottimizza cache API</span>
+                    <span class="pill" onclick="inviaPillola('Approfondisci la scalabilità del sistema')">🔍 Approfondisci scalabilità</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <textarea id="userInput" placeholder="Scrivi o memorizza una nuova regola per questo progetto... (es. 'Memorizza che...')"></textarea>
+            <button class="btn-send" onclick="inviaMessaggio()">Invia</button>
+        </div>
+    </main>
+
+    <script>
+        let currentProject = 'Studio Architettura';
+        const currentUserId = 'utente_default_demo';
+
+        function setZoom(mode) {
+            document.body.className = 'mode-' + mode;
+            document.getElementById('btnLight').classList.toggle('active', mode === 'light');
+            document.getElementById('btnPro').classList.toggle('active', mode === 'pro');
+        }
+
+        function selezionaProgetto(nome, element) {
+            document.querySelectorAll('.project-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+            currentProject = nome;
+            document.getElementById('currentContextTitle').innerText = 'Contesto: ' + nome;
+        }
+
+        function inviaPillola(testo) {
+            document.getElementById('userInput').value = testo;
+            inviaMessaggio();
+        }
+
+        async function inviaMessaggio() {
+            const input = document.getElementById('userInput');
+            const container = document.getElementById('chatContainer');
+            const testoMessaggio = input.value.trim();
+            if (!testoMessaggio) return;
+
+            // 1. Mostra il messaggio dell'utente in chat
+            const userMsg = document.createElement('div');
+            userMsg.className = 'message';
+            userMsg.style.textAlign = 'right';
+            userMsg.style.background = '#e0f2fe';
+            userMsg.innerText = testoMessaggio;
+            container.appendChild(userMsg);
+
+            input.value = '';
+            container.scrollTop = container.scrollHeight;
+
+            // 2. Crea un segnaposto per la risposta in caricamento
+            const aiMsg = document.createElement('div');
+            aiMsg.className = 'message assistant';
+            aiMsg.innerText = 'Elaborazione in corso e sincronizzazione con Supabase...';
+            container.appendChild(aiMsg);
+            container.scrollTop = container.scrollHeight;
+
+            try {
+                // 3. Chiamata reale al server Node.js / Supabase / DeepSeek
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId: currentUserId,
+                        progetto: currentProject,
+                        messaggio: testoMessaggio
+                    })
+                });
+
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.errore || 'Errore di comunicazione col server');
+
+                // 4. Mostra la risposta effettiva dell'IA
+                aiMsg.innerText = data.risposta;
+            } catch (err) {
+                aiMsg.innerText = 'Errore: ' + err.message;
+                aiMsg.style.borderColor = '#ef4444';
+            }
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function esportaMemoriaTXT() {
+            const blob = new Blob([`MEMORIA DEL PROGETTO: ${currentProject}\n--------------------\nSincronizzato con Supabase`], { type: 'text/plain;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `memoria-${currentProject.toLowerCase().replace(/\s+/g, '-')}.txt`;
+            link.click();
+        }
+    </script>
+</body>
+</html>
