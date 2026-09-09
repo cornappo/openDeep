@@ -68,7 +68,7 @@ app.post('/api/controlla-stato', async (req, res) => {
     const { tokenTask, payloadUtente, fileAllegato } = req.body;
     
     if (!tokenTask) {
-        return.status(400).json({ stato: "ERRORE", log: ["Token mancante."], risultato: "Nessun token fornito." });
+        return res.status(400).json({ stato: "ERRORE", log: ["Token mancante."], risultato: "Nessun token fornito." });
     }
 
     try {
@@ -86,9 +86,8 @@ app.post('/api/controlla-stato', async (req, res) => {
         let currentTask = checkRes.rows[0];
 
         // Se il task è IN_CORSO e non ha ancora avviato la chiamata o completato, eseguiamo DeepSeek in background
-        if (currentTask.stato === 'IN_CORSO' && !currentTask.risultato && !currentTask._processing) {
-            // Marcato in elaborazione locale per evitare doppie chiamate concorrenti
-            pool.query(`UPDATE tasks_log SET log = array_append(log, 'Elaborazione richiesta in corso...') WHERE token_task = $1`, [tokenTask]);
+        if (currentTask.stato === 'IN_CORSO' && !currentTask.risultato) {
+            await pool.query(`UPDATE tasks_log SET log = array_append(log, 'Elaborazione richiesta in corso...') WHERE token_task = $1`, [tokenTask]);
 
             EseguiChiamataDeepSeek(payloadUtente, fileAllegato)
                 .then(async risultato => {
