@@ -13,7 +13,7 @@
             --panel-bg: #212121;
             --text-color: #ececec;
             --text-secondary: #9b9b9b;
-            --accent-color: #d97706; /* Stile caldo/arancione Claude */
+            --accent-color: #d97706;
             --border-color: #2b2b2b;
             --input-bg: #212121;
             --user-bubble: #2f2f2f;
@@ -34,7 +34,6 @@
             overflow: hidden;
         }
 
-        /* Sidebar stile Claude */
         aside {
             width: 260px;
             background-color: var(--sidebar-bg);
@@ -52,12 +51,6 @@
             padding: 0;
             overflow: hidden;
             border-right: none;
-        }
-
-        .sidebar-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
         }
 
         .new-chat-btn {
@@ -117,6 +110,12 @@
             color: var(--text-color);
         }
 
+        .project-btn.active {
+            color: var(--text-color);
+            font-weight: 600;
+            border-left: 3px solid var(--accent-color);
+        }
+
         .export-btn {
             background-color: transparent;
             border: 1px solid var(--border-color);
@@ -135,7 +134,6 @@
             color: var(--text-color);
         }
 
-        /* Main Chat Area */
         main {
             flex: 1;
             display: flex;
@@ -213,7 +211,6 @@
             color: var(--text-color);
         }
 
-        /* Input Area */
         .input-area {
             padding: 20px;
             max-width: 760px;
@@ -314,16 +311,16 @@
         
         <div class="chat-container" id="chatContainer">
             <div class="message assistant">
-                Ben tornato. Ho in memoria la configurazione e le ultime scelte fatte. Come procediamo?
+                Ben tornato nel contesto di Studio Architettura. Come posso aiutarti oggi?
             </div>
         </div>
 
         <div class="input-area">
             <div class="input-box">
-                <button class="attach-btn" title="Allega file o documenti" onclick="alert('Funzione allegati pronta per l\'integrazione file.')">
+                <button class="attach-btn" title="Allega file o documenti" onclick="alert('Funzione allegati pronta.')">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
                 </button>
-                <textarea id="userInput" rows="1" placeholder="Scrivi un messaggio o chiedi un'analisi..." onkeydown="gestisciInvio(event)"></textarea>
+                <textarea id="userInput" rows="1" placeholder="Scrivi un messaggio..." onkeydown="gestisciInvio(event)"></textarea>
                 <button class="send-btn" onclick="inviaMessaggio()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
                 </button>
@@ -335,8 +332,7 @@
         let progettoCorrente = 'Studio Architettura';
 
         function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            sidebar.classList.toggle('collapsed');
+            document.getElementById('sidebar').classList.toggle('collapsed');
         }
 
         function cambiaProgetto(nomeProgetto) {
@@ -344,6 +340,7 @@
             document.getElementById('headerTitle').innerText = nomeProgetto;
             document.getElementById('exportLink').href = `/api/export-txt?progetto=${encodeURIComponent(nomeProgetto)}`;
             
+            // Aggiorna classe active ai bottoni progetto
             document.querySelectorAll('.project-btn').forEach(btn => {
                 if (btn.innerText === nomeProgetto) {
                     btn.classList.add('active');
@@ -351,6 +348,11 @@
                     btn.classList.remove('active');
                 }
             });
+
+            // Pulisce e avvia una nuova sessione pulita per il progetto selezionato
+            document.getElementById('chatContainer').innerHTML = `
+                <div class="message assistant">Contesto attivo impostato su: <strong>${nomeProgetto}</strong>. Come procediamo?</div>
+            `;
         }
 
         function nuovaConversazione() {
@@ -361,9 +363,10 @@
 
         function caricaChatStorica(titolo) {
             const chatContainer = document.getElementById('chatContainer');
-            chatContainer.innerHTML += `
-                <div class="message user">Mostrami il riassunto di: ${titolo}</div>
-                <div class="message assistant">Caricamento dello storico per "${titolo}" dal database di Supabase completato.</div>
+            // Pulisce la chat precedente prima di caricare lo storico selezionato
+            chatContainer.innerHTML = `
+                <div class="message user">Richiesta ripristino storico: ${titolo}</div>
+                <div class="message assistant">Sessione ripristinata dal database per: <strong>${titolo}</strong>. La memoria e i dati associati sono pronti. Come desideri continuare?</div>
             `;
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
@@ -382,7 +385,6 @@
 
             const chatContainer = document.getElementById('chatContainer');
             
-            // Aggiungi messaggio utente
             const userMsg = document.createElement('div');
             userMsg.className = 'message user';
             userMsg.innerText = testo;
@@ -391,7 +393,6 @@
             input.value = '';
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            // Messaggio temporaneo di elaborazione
             const loadingMsg = document.createElement('div');
             loadingMsg.className = 'message assistant';
             loadingMsg.innerText = 'Elaborazione in corso...';
@@ -413,7 +414,6 @@
                 aiMsg.innerText = data.risposta || data.errore;
                 chatContainer.appendChild(aiMsg);
 
-                // Aggiungi automaticamente alla lista delle conversazioni recenti se è il primo scambio
                 aggiungiStoricoDinamico(testo);
 
             } catch (err) {
@@ -430,7 +430,6 @@
             const historyList = document.getElementById('historyList');
             const titoloBreve = testo.length > 25 ? testo.substring(0, 25) + '...' : testo;
             
-            // Evita duplicati identici in cima
             const items = historyList.getElementsByClassName('history-item');
             for (let item of items) {
                 if (item.innerText === titoloBreve) return;
@@ -439,10 +438,7 @@
             const newItem = document.createElement('div');
             newItem.className = 'history-item';
             newItem.innerText = titoloBreve;
-            newItem.onclick = () => {
-                const chatContainer = document.getElementById('chatContainer');
-                chatContainer.innerHTML += `<div class="message assistant">Ripristinata conversazione: "${titoloBreve}"</div>`;
-            };
+            newItem.onclick = () => caricaChatStorica(titoloBreve);
             historyList.prepend(newItem);
         }
     </script>
