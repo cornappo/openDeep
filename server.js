@@ -14,7 +14,13 @@ app.use(express.json({ limit: '10mb' }));
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: {
-        rejectUnauthorized: false
+        rejectUnauthorized: true,
+        checkServerIdentity: (servername, cert) => {
+            if (!servername.endsWith('.supabase.com') && !servername.endsWith('.supabase.co') && !servername.endsWith('.pooler.supabase.com')) {
+                return new Error(`Certificato non valido per l'host: ${servername}`);
+            }
+            return undefined;
+        }
     }
 });
 
