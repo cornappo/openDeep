@@ -464,6 +464,39 @@
             }
         }
 
+        function spostaInProgettoEsistente(nomeProgetto) {
+            cambiaProgetto(nomeProgetto);
+            alert(`Conversazione associata con successo al contesto "${nomeProgetto}".`);
+        }
+
+        function aggiornaChipIntelligenti(testoUtente, rispostaAI) {
+            const chipsContainer = document.getElementById('chipsContainer');
+            const testoCompleto = (testoUtente + " " + rispostaAI).toLowerCase();
+            let nuoviChips = '';
+
+            // 1. Rileva se la conversazione corrisponde a un progetto esistente diverso da quello attuale
+            if (testoCompleto.includes('tech') || testoCompleto.includes('investiment') || testoCompleto.includes('semiconduttori')) {
+                if (progettoCorrente !== 'Investimenti Tech') {
+                    nuoviChips += `<div class="chip" onclick="spostaInProgettoEsistente('Investimenti Tech')">🔗 Unisci a "Investimenti Tech"</div>`;
+                }
+            } else if (testoCompleto.includes('orto') || testoCompleto.includes('prato') || testoCompleto.includes('piante')) {
+                if (progettoCorrente !== 'Prato & Orto Naturale') {
+                    nuoviChips += `<div class="chip" onclick="spostaInProgettoEsistente('Prato & Orto Naturale')">🔗 Unisci a "Prato & Orto Naturale"</div>`;
+                }
+            }
+
+            // 2. Propone un nome specifico per un NUOVO progetto basato sulle parole chiave
+            let nomeProgettoSuggerito = "Nuovo Progetto Tech";
+            if (testoCompleto.includes('mouse') || testoCompleto.includes('hardware')) {
+                nomeProgettoSuggerito = "Hardware & Periferiche";
+            }
+
+            nuoviChips += `<div class="chip" onclick="aggiungiProgettoDinamico('${nomeProgettoSuggerito}')">💡 Salva come "${nomeProgettoSuggerito}"</div>`;
+            nuoviChips += `<div class="chip" onclick="triggerAllegato()">📎 Allega File</div>`;
+
+            chipsContainer.innerHTML = nuoviChips;
+        }
+
         function triggerAllegato() {
             document.getElementById('fileInput').click();
         }
@@ -550,6 +583,9 @@
                 aiMsg.className = 'message assistant';
                 aiMsg.innerText = data.risposta || data.errore;
                 chatContainer.appendChild(aiMsg);
+
+                // Aggiornamento dinamico dei chip in base alla risposta ricevuta
+                aggiornaChipIntelligenti(testo, data.risposta || "");
 
                 aggiungiStoricoDinamico(testo);
 
