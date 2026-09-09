@@ -77,11 +77,9 @@
     });
 
     async function aggiornaSuggerimentiIniziali() {
-      console.log("[LOG FRONTEND] Richiesta suggerimenti iniziali...");
       try {
         const response = await fetch('/api/suggerimenti');
         const listaSuggerimenti = await response.json();
-        console.log("[LOG FRONTEND] Suggerimenti ricevuti:", listaSuggerimenti);
         mostraLauncherChips(listaSuggerimenti);
       } catch (err) {
         console.warn("[LOG FRONTEND] Errore caricamento suggerimenti:", err);
@@ -105,13 +103,6 @@
 
         btn.innerText = chip.etichetta;
         btn.onclick = function() {
-          const tuttiIbottoni = container.querySelectorAll('button');
-          tuttiIbottoni.forEach(b => {
-            b.disabled = true;
-            b.style.opacity = '0.5';
-            b.style.cursor = 'not-allowed';
-          });
-
           document.getElementById('userInput').value = chip.testoPrompt;
           inviaMessaggio();
         };
@@ -189,8 +180,6 @@
       var input = document.getElementById('userInput');
       var text = input.value.trim();
       if (!text && !fileAllegatoCorrente) return;
-
-      console.log("[LOG FRONTEND] Invio messaggio al server:", text);
 
       var chatBox = document.getElementById('chat-box');
       var oraInvio = new Date();
@@ -280,7 +269,6 @@
         if (document.getElementById(loadingId)) {
           document.getElementById(loadingId).remove();
         }
-        console.error("[LOG FRONTEND] Errore avvio task:", err);
         mostraErroreChat(chatBox, "⚠️ Errore di comunicazione con il server Node.js.");
         ripristinaStatoPronto();
       }
