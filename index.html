@@ -133,6 +133,7 @@
             border-radius: 8px;
             line-height: 1.6;
             font-size: 0.950rem;
+            white-space: pre-wrap;
         }
 
         .message.assistant {
@@ -224,9 +225,9 @@
             <button onclick="esportaMemoriaTXT()" style="font-size:0.75rem; cursor:pointer; padding:0.2rem 0.5rem;">Esporta TXT</button>
         </div>
         <ul class="project-list" id="projectList">
-            <li class="project-item active" onclick="selezionaProgetto('Studio Architettura')">Studio Architettura</li>
-            <li class="project-item" onclick="selezionaProgetto('Prato & Orto Naturale')">Prato & Orto Naturale</li>
-            <li class="project-item" onclick="selezionaProgetto('Investimenti Tech')">Investimenti Tech</li>
+            <li class="project-item active" onclick="selezionaProgetto('Studio Architettura', this)">Studio Architettura</li>
+            <li class="project-item" onclick="selezionaProgetto('Prato & Orto Naturale', this)">Prato & Orto Naturale</li>
+            <li class="project-item" onclick="selezionaProgetto('Investimenti Tech', this)">Investimenti Tech</li>
         </ul>
     </aside>
 
@@ -258,15 +259,19 @@
     </main>
 
     <script>
+        let currentProject = 'Studio Architettura';
+        const currentUserId = 'utente_default_demo';
+
         function setZoom(mode) {
             document.body.className = 'mode-' + mode;
             document.getElementById('btnLight').classList.toggle('active', mode === 'light');
             document.getElementById('btnPro').classList.toggle('active', mode === 'pro');
         }
 
-        function selezionaProgetto(nome) {
+        function selezionaProgetto(nome, element) {
             document.querySelectorAll('.project-item').forEach(el => el.classList.remove('active'));
-            event.target.classList.add('active');
+            element.classList.add('active');
+            currentProject = nome;
             document.getElementById('currentContextTitle').innerText = 'Contesto: ' + nome;
         }
 
@@ -275,41 +280,60 @@
             inviaMessaggio();
         }
 
-        function inviaMessaggio() {
+        async function inviaMessaggio() {
             const input = document.getElementById('userInput');
             const container = document.getElementById('chatContainer');
-            if (!input.value.trim()) return;
+            const testoMessaggio = input.value.trim();
+            if (!testoMessaggio) return;
 
-            // Messaggio utente
+            // 1. Mostra il messaggio dell'utente in chat
             const userMsg = document.createElement('div');
             userMsg.className = 'message';
             userMsg.style.textAlign = 'right';
             userMsg.style.background = '#e0f2fe';
-            userMsg.innerText = input.value;
+            userMsg.innerText = testoMessaggio;
             container.appendChild(userMsg);
 
-            const query = input.value;
             input.value = '';
+            container.scrollTop = container.scrollHeight;
 
-            // Risposta simulata dell'agente con opzioni ipertestuali
-            setTimeout(() => {
-                const aiMsg = document.createElement('div');
-                aiMsg.className = 'message assistant';
-                aiMsg.innerHTML = `<p>Ho memorizzato l'aggiornamento nel database per questo contesto. Sfruttando la cache di DeepSeek, il pregresso è stato agganciato senza costi aggiuntivi.</p>
-                <div class="pills-bar">
-                    <span class="pill" onclick="inviaPillola('Mostra dettagli tecnici')">⚙️ Dettagli tecnici</span>
-                    <span class="pill" onclick="inviaPillola('Esporta stato corrente')">📥 Esporta report</span>
-                </div>`;
-                container.appendChild(aiMsg);
-                container.scrollTop = container.scrollHeight;
-            }, 600);
+            // 2. Crea un segnaposto per la risposta in caricamento
+            const aiMsg = document.createElement('div');
+            aiMsg.className = 'message assistant';
+            aiMsg.innerText = 'Elaborazione in corso e sincronizzazione con Supabase...';
+            container.appendChild(aiMsg);
+            container.scrollTop = container.scrollHeight;
+
+            try {
+                // 3. Chiamata reale al server Node.js / Supabase / DeepSeek
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId: currentUserId,
+                        progetto: currentProject,
+                        messaggio: testoMessaggio
+                    })
+                });
+
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.errore || 'Errore di comunicazione col server');
+
+                // 4. Mostra la risposta effettiva dell'IA
+                aiMsg.innerText = data.risposta;
+            } catch (err) {
+                aiMsg.innerText = 'Errore: ' + err.message;
+                aiMsg.style.borderColor = '#ef4444';
+            }
+
+            container.scrollTop = container.scrollHeight;
         }
 
         function esportaMemoriaTXT() {
-            const blob = new Blob(["MEMORIA DEL PROGETTO\n--------------------\nStato: Attivo\nDati sincronizzati con Supabase."], { type: 'text/plain;charset=utf-8' });
+            const blob = new Blob([`MEMORIA DEL PROGETTO: ${currentProject}\n--------------------\nSincronizzato con Supabase`], { type: 'text/plain;charset=utf-8' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = 'memoria-progetto.txt';
+            link.download = `memoria-${currentProject.toLowerCase().replace(/\s+/g, '-')}.txt`;
             link.click();
         }
     </script>
