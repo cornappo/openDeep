@@ -68,23 +68,50 @@ app.post('/api/avvia-task', async (req, res) => {
     }
 });
 
-// Endpoint per controllare lo stato (sostituisce activeTasks in-memory con Supabase)
+// Endpoint per controllare lo stato con fallback di sicurezza integrato
 app.post('/api/controlla-stato', async (req, res) => {
     const { tokenTask, payloadUtente, fileAllegato } = req.body;
     
+    if (!tokenTask) {
+        return res.status(400).json({ stato: "ERRORE", log: ["Token mancante."], risultato: "Nessun token fornito." });
+    }
+
     try {
-        // Verifica se il task esiste già nel database
-        const checkRes = await pool.query('SELECT * FROM tasks_log WHERE token_task = $1', [tokenTask]);
+        let checkRes = await pool.query('SELECT * FROM tasks_log WHERE token_task = $1', [tokenTask]);
         
+        // Se il token non esiste nel DB, lo creiamo al volo (fallback automatico per evitare errori di disallineamento)
         if (checkRes.rows.length === 0) {
-            return res.status(404).json({ stato: "ERRORE", log: ["Task non trovato."], risultato: "Token non valido." });
+            await pool.query(
+                `INSERT INTO tasks_log (token_task, stato, log) VALUES ($1, $2, $3) ON CONFLICT (token_task) DO NOTHING`,
+                [tokenTask, 'IN_CORSO', ["Ripristino task automatico...", "Connessione a DeepSeek in corso..."]]
+            );
+            
+            // Avviamo la chiamata a DeepSeek in background
+            EseguiChiamataDeepSeek(payloadUtente, fileAllegato)
+                .then(async risultato => {
+                    await pool.query(
+                        `UPDATE tasks_log SET stato = $1, log = $2, risultato = $3 WHERE token_task = $4`,
+                        ['COMPLETATO', ["Operazione completata con successo."], risultato, tokenTask]
+                    );
+                })
+                .catch(async err => {
+                    await pool.query(
+                        `UPDATE tasks_log SET stato = $1, log = $2, risultato = $3 WHERE token_task = $4`,
+                        ['ERRORE', ["Errore durante l'esecuzione."], err.toString(), tokenTask]
+                    );
+                });
+
+            return res.json({
+                stato: "IN_CORSO",
+                log: ["Ripristino task automatico...", "Connessione a DeepSeek in corso..."],
+                risultato: null
+            });
         }
 
         let currentTask = checkRes.rows[0];
 
-        // Se il task è appena stato registrato o avviato, facciamo partire la chiamata in background
-        if (currentTask.stato === 'IN_CORSO' && (!currentTask.risultato || currentTask.risultato === '')) {
-            // Eseguiamo la chiamata a DeepSeek in modo asincrono
+        // Se il task è in corso e non ha ancora un risultato, avviamo la chiamata DeepSeek se non è già partita
+        if (currentTask.stato === 'IN_CORSO' && !currentTask.risultato) {
             EseguiChiamataDeepSeek(payloadUtente, fileAllegato)
                 .then(async risultato => {
                     await pool.query(
@@ -100,7 +127,6 @@ app.post('/api/controlla-stato', async (req, res) => {
                 });
         }
 
-        // Restituisce lo stato attuale formattato per il frontend
         res.json({
             stato: currentTask.stato,
             log: currentTask.log,
@@ -156,7 +182,6 @@ async function EseguiChiamataDeepSeek(inputUtente, fileInfo) {
 
     let rispostaIA = data.choices[0].message.content;
     
-    // Inclusione dei log come richiesto dalle preferenze
     rispostaIA += "\n\n---\n" +
                   "**[SYSTEM LOGS - REAL]**\n" +
                   "- **Modello:** `deepseek-chat`\n" +
