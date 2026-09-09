@@ -11,13 +11,11 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
-// Configurazione Connessione Supabase / PostgreSQL
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
 });
 
-// Inizializzazione della tabella persistente nel database
 async function initDatabase() {
     try {
         await pool.query(`
@@ -37,15 +35,12 @@ async function initDatabase() {
 
 initDatabase();
 
-// Serve l'interfaccia HTML dalla cartella public
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Fallback se index.html si trova nella root del progetto
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Endpoint per i suggerimenti iniziali
 app.get('/api/suggerimenti', (req, res) => {
     res.json([
         { etichetta: "+ Approfonda Analisi", testoPrompt: "Analizza in dettaglio l'ultimo progetto e proponi i prossimi passi operativi." },
@@ -53,7 +48,7 @@ app.get('/api/suggerimenti', (req, res) => {
     ]);
 });
 
-// Endpoint per avviare il task asincrono
+// Avvia il task e restituisce subito il token
 app.post('/api/avvia-task', async (req, res) => {
     const tokenTask = 'task_' + Date.now();
     try {
@@ -68,7 +63,7 @@ app.post('/api/avvia-task', async (req, res) => {
     }
 });
 
-// Endpoint per controllare lo stato con fallback di sicurezza integrato
+// Controlla lo stato o avvia la chiamata se il task viene ricreato al volo
 app.post('/api/controlla-stato', async (req, res) => {
     const { tokenTask, payloadUtente, fileAllegato } = req.body;
     
@@ -79,14 +74,12 @@ app.post('/api/controlla-stato', async (req, res) => {
     try {
         let checkRes = await pool.query('SELECT * FROM tasks_log WHERE token_task = $1', [tokenTask]);
         
-        // Se il token non esiste nel DB, lo creiamo al volo (fallback automatico per evitare errori di disallineamento)
         if (checkRes.rows.length === 0) {
             await pool.query(
                 `INSERT INTO tasks_log (token_task, stato, log) VALUES ($1, $2, $3) ON CONFLICT (token_task) DO NOTHING`,
                 [tokenTask, 'IN_CORSO', ["Ripristino task automatico...", "Connessione a DeepSeek in corso..."]]
             );
             
-            // Avviamo la chiamata a DeepSeek in background
             EseguiChiamataDeepSeek(payloadUtente, fileAllegato)
                 .then(async risultato => {
                     await pool.query(
@@ -110,7 +103,6 @@ app.post('/api/controlla-stato', async (req, res) => {
 
         let currentTask = checkRes.rows[0];
 
-        // Se il task è in corso e non ha ancora un risultato, avviamo la chiamata DeepSeek se non è già partita
         if (currentTask.stato === 'IN_CORSO' && !currentTask.risultato) {
             EseguiChiamataDeepSeek(payloadUtente, fileAllegato)
                 .then(async risultato => {
