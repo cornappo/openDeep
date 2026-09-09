@@ -13,7 +13,9 @@ app.use(express.json({ limit: '10mb' }));
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
 async function initDatabase() {
@@ -30,11 +32,17 @@ async function initDatabase() {
         console.log("[LOG DB] Tabella tasks_log verificata o creata con successo su Supabase.");
     } catch (err) {
         console.error("[LOG DB] Errore inizializzazione database:", err.message);
+        throw err;
     }
 }
 
 async function startServer() {
-    await initDatabase();
+    try {
+        await initDatabase();
+    } catch (dbErr) {
+        console.error("[CRITICAL] Impossibile avviare il server senza connessione al database:", dbErr.message);
+        process.exit(1);
+    }
 
     app.use(express.static(path.join(__dirname, 'public')));
 
