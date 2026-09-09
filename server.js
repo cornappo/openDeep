@@ -214,9 +214,9 @@ app.post('/api/controlla-stato', async (req, res) => {
     }
 });
 
-// Avvio immediato del server e inizializzazione database
+// Avvio del server con bind su '0.0.0.0' integrato per Render
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server avviato sulla porta ${PORT}`);
     await initDatabase();
 });
