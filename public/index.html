@@ -241,7 +241,6 @@
             color: var(--text-color);
         }
 
-        /* Area Chip Dinamici */
         .chips-container {
             display: flex;
             gap: 8px;
@@ -373,11 +372,10 @@
         
         <div class="chat-container" id="chatContainer">
             <div class="message assistant">
-                Ben tornato nel contesto di Studio Architettura. Come posso aiutarti oggi?
+                Bentornato nel contesto di Studio Architettura. Come posso aiutarti oggi?
             </div>
         </div>
 
-        <!-- Area Chip Dinamici -->
         <div class="chips-container" id="chipsContainer">
             <div class="chip" onclick="promuoviAProgettoDinamico()">💡 Salva chat come Progetto</div>
             <div class="chip" onclick="triggerAllegato()">📎 Allega Documento / File</div>
@@ -474,7 +472,6 @@
             const testoCompleto = (testoUtente + " " + rispostaAI).toLowerCase();
             let nuoviChips = '';
 
-            // Estrazione autonoma del contesto basata sulle parole chiave dell'utente
             let nomeEstratto = "Nuovo Progetto";
             if (testoCompleto.includes('topo') || testoCompleto.includes('topi')) {
                 nomeEstratto = "Progetto Topi";
@@ -491,7 +488,6 @@
                 }
             }
 
-            // Generazione dinamica dei chip basata sul contesto estratto
             nuoviChips += `<div class="chip" onclick="aggiungiProgettoDinamico('${nomeEstratto}')">💡 Salva come "${nomeEstratto}"</div>`;
             nuoviChips += `<div class="chip" onclick="triggerAllegato()">📎 Allega File</div>`;
 
@@ -585,9 +581,7 @@
                 aiMsg.innerText = data.risposta || data.errore;
                 chatContainer.appendChild(aiMsg);
 
-                // Aggiornamento dinamico dei chip in base alla risposta ricevuta
                 aggiornaChipIntelligenti(testo, data.risposta || "");
-
                 aggiungiStoricoDinamico(testo);
 
             } catch (err) {
