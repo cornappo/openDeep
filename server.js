@@ -47,14 +47,14 @@ async function initDatabase() {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// Rotta Upload e Chunking file esistente
+// Rotta Upload e Chunking file esistente (con rimozione byte nulli 0x00)
 app.post('/api/upload', upload.single('file'), async (req, res) => {
     const { progetto = 'Studio Architettura' } = req.body;
     const file = req.file;
     if (!file) return res.status(400).json({ errore: "Nessun file caricato." });
 
     try {
-        const textContent = file.buffer.toString('utf-8');
+        const textContent = file.buffer.toString('utf-8').replace(/\0/g, '');
         const chunkSize = 500;
         const chunks = [];
         for (let i = 0; i < textContent.length; i += chunkSize) {
@@ -85,11 +85,11 @@ app.post('/api/salva-documento', async (req, res) => {
     }
 
     try {
-        // Se la modalità è 'nuovo', potremmo opzionalmente pulire o semplicemente aggiungere un nuovo file
+        const textCleaned = contenuto.replace(/\0/g, '');
         const chunkSize = 500;
         const chunks = [];
-        for (let i = 0; i < contenuto.length; i += chunkSize) {
-            chunks.push(contenuto.substring(i, i + chunkSize));
+        for (let i = 0; i < textCleaned.length; i += chunkSize) {
+            chunks.push(textCleaned.substring(i, i + chunkSize));
         }
 
         for (const chunk of chunks) {
