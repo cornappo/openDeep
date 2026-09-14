@@ -162,6 +162,25 @@
             } catch (e) {}
         }
 
+        async function salvaDocumentoDaIa(fileName, contenuto) {
+            try {
+                const res = await fetch('/api/salva-documento', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ progetto: progettoCorrente, fileName, contenuto })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    alert(`Documento "${fileName}" salvato e indicizzato con successo!`);
+                    caricaAllegatiServer();
+                } else {
+                    alert("Errore nel salvataggio: " + data.errore);
+                }
+            } catch (err) {
+                alert("Errore di rete durante il salvataggio del documento.");
+            }
+        }
+
         function gestisciInvio(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMessaggio(); } }
 
         async function inviaMessaggio() {
@@ -188,7 +207,38 @@
                 });
                 const data = await res.json();
                 chat.removeChild(loading);
-                chat.innerHTML += `<div class="message assistant">${data.risposta || data.errore}</div>`;
+
+                let rispostaTesto = data.risposta || data.errore;
+                
+                // Rilevamento blocco json-doc per la generazione automatica di documenti
+                const jsonDocRegex = /```json-doc\s*([\s\S]*?)\s*```/;
+                const match = rispostaTesto.match(jsonDocRegex);
+
+                if (match) {
+                    try {
+                        const docPayload = JSON.parse(match[1]);
+                        rispostaTesto = rispostaTesto.replace(jsonDocRegex, '').trim();
+
+                        chat.innerHTML += `<div class="message assistant">${rispostaTesto}</div>`;
+
+                        // Creazione chip dinamica per il salvataggio immediato
+                        const chipsContainer = document.getElementById('chipsContainer');
+                        const dynamicChip = document.createElement('div');
+                        dynamicChip.className = 'chip';
+                        dynamicChip.innerHTML = `📄 Crea documento: <strong>${docPayload.fileName}</strong>`;
+                        dynamicChip.onclick = () => {
+                            salvaDocumentoDaIa(docPayload.fileName, docPayload.contenuto);
+                            dynamicChip.remove();
+                        };
+                        chipsContainer.appendChild(dynamicChip);
+
+                    } catch (e) {
+                        chat.innerHTML += `<div class="message assistant">${rispostaTesto}</div>`;
+                    }
+                } else {
+                    chat.innerHTML += `<div class="message assistant">${rispostaTesto}</div>`;
+                }
+
             } catch (err) {
                 chat.removeChild(loading);
                 chat.innerHTML += `<div class="message assistant">Errore di comunicazione.</div>`;
