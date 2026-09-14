@@ -11,6 +11,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
+const EMBEDDING_DIMENSION = 1536;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -19,6 +20,60 @@ const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
 });
+
+function buildFallbackEmbedding(inputText = '') {
+    const vector = [];
+    const safeText = String(inputText || '');
+
+    for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
+        let hash = 0;
+        for (let j = 0; j < safeText.length; j++) {
+            hash = (hash * 31 + safeText.charCodeAt(j) + i * 17) >>> 0;
+        }
+        const value = ((hash % 1000000) / 1000000) * 2 - 1;
+        vector.push(Number(value.toFixed(6)));
+    }
+
+    return vector;
+}
+
+async function generateEmbedding(text) {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return buildFallbackEmbedding('');
+
+    if (!process.env.DEEPSEEK_API_KEY) {
+        return buildFallbackEmbedding(cleanText);
+    }
+
+    try {
+        const response = await fetch('https://api.deepseek.com/v1/embeddings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-embedding',
+                input: cleanText
+            })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data?.error?.message || JSON.stringify(data));
+        }
+
+        const embedding = data?.data?.[0]?.embedding;
+        if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIMENSION) {
+            throw new Error('Embedding ricevuto con dimensione non valida.');
+        }
+
+        return embedding.map(v => Number(v));
+    } catch (err) {
+        console.warn('[EMBEDDING FALLBACK] Uso di embedding deterministico perché l’API non è disponibile:', err.message);
+        return buildFallbackEmbedding(cleanText);
+    }
+}
 
 async function initDatabase() {
     try {
@@ -74,10 +129,10 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         }
 
         for (const chunk of chunks) {
-            const dummyVector = Array(1536).fill(0.1); 
+            const embedding = await generateEmbedding(chunk);
             await pool.query(
                 `INSERT INTO document_chunks (progetto, file_name, chunk_text, embedding) VALUES ($1, $2, $3, $4)`,
-                [progetto, file.originalname, chunk, `[${dummyVector.join(',')}]`]
+                [progetto, file.originalname, chunk, `[${embedding.join(',')}]`]
             );
         }
 
@@ -103,10 +158,10 @@ app.post('/api/salva-documento', async (req, res) => {
         }
 
         for (const chunk of chunks) {
-            const dummyVector = Array(1536).fill(0.1);
+            const embedding = await generateEmbedding(chunk);
             await pool.query(
                 `INSERT INTO document_chunks (progetto, file_name, chunk_text, embedding) VALUES ($1, $2, $3, $4)`,
-                [progetto, fileName.endsWith('.txt') ? fileName : `${fileName}.txt`, chunk, `[${dummyVector.join(',')}]`]
+                [progetto, fileName.endsWith('.txt') ? fileName : `${fileName}.txt`, chunk, `[${embedding.join(',')}]`]
             );
         }
 
