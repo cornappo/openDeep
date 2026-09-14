@@ -25,58 +25,35 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-function buildFallbackEmbedding(inputText = '') {
-    const vector = [];
-    const safeText = String(inputText || '');
-
-    for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
-        let hash = 0;
-        for (let j = 0; j < safeText.length; j++) {
-            hash = (hash * 31 + safeText.charCodeAt(j) + i * 17) >>> 0;
-        }
-        const value = ((hash % 1000000) / 1000000) * 2 - 1;
-        vector.push(Number(value.toFixed(6)));
-    }
-
-    return vector;
-}
-
 async function generateEmbedding(text) {
     const cleanText = sanitizeTextForStorage(text).trim();
-    if (!cleanText) return buildFallbackEmbedding('');
-
-    if (!process.env.DEEPSEEK_API_KEY) {
-        return buildFallbackEmbedding(cleanText);
+    if (!cleanText) throw new Error('Impossibile creare un embedding per testo vuoto.');
+    if (!process.env.GEMINI_API_KEY) {
+        throw new Error('GEMINI_API_KEY non configurata: embedding reale obbligatorio.');
     }
 
-    try {
-        const response = await fetch('https://api.deepseek.com/v1/embeddings', {
+    const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+        {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'deepseek-embedding',
-                input: cleanText
+                content: { parts: [{ text: cleanText }] },
+                outputDimensionality: EMBEDDING_DIMENSION
             })
         });
 
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data?.error?.message || JSON.stringify(data));
-        }
-
-        const embedding = data?.data?.[0]?.embedding;
-        if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIMENSION) {
-            throw new Error('Embedding ricevuto con dimensione non valida.');
-        }
-
-        return embedding.map(v => Number(v));
-    } catch (err) {
-        console.warn('[EMBEDDING FALLBACK] Uso di embedding deterministico perché l’API non è disponibile:', err.message);
-        return buildFallbackEmbedding(cleanText);
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data?.error?.message || `Errore Gemini embeddings HTTP ${response.status}`);
     }
+
+    const embedding = data?.embedding?.values;
+    if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIMENSION) {
+        throw new Error(`Embedding Gemini non valido: attesi ${EMBEDDING_DIMENSION} valori.`);
+    }
+
+    return embedding.map(value => Number(value));
 }
 
 async function initDatabase() {
@@ -99,6 +76,7 @@ async function initDatabase() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        await pool.query(`CREATE INDEX IF NOT EXISTS document_chunks_embedding_idx ON document_chunks USING hnsw (embedding vector_cosine_ops);`);
         console.log("[LOG DB] Estensione vector e tabelle verificate/create con successo.");
     } catch (err) {
         console.error("[LOG DB] Errore inizializzazione database:", err.message);
@@ -193,14 +171,26 @@ app.post('/api/chat', async (req, res) => {
     const sessionKey = `${userId}_${progetto}`;
 
     try {
+        if (!messaggio || !String(messaggio).trim()) {
+            return res.status(400).json({ errore: 'Il messaggio non può essere vuoto.' });
+        }
+
         let memRes = await pool.query('SELECT memoria_testo FROM user_memories WHERE user_id = $1', [sessionKey]);
         let memoriaAttuale = memRes.rows[0]?.memoria_testo || "Nessuna informazione registrata.";
 
+        const queryEmbedding = await generateEmbedding(messaggio);
         const contextRes = await pool.query(
-            `SELECT file_name, chunk_text FROM document_chunks WHERE progetto = $1 ORDER BY id ASC`,
-            [progetto]
+            `SELECT id, file_name, chunk_text,
+                    1 - (embedding <=> $2::vector) AS similarity
+             FROM document_chunks
+             WHERE progetto = $1
+             ORDER BY embedding <=> $2::vector
+             LIMIT 8`,
+            [progetto, `[${queryEmbedding.join(',')}]`]
         );
-        let contestoDocumentale = contextRes.rows.map(r => `[Fonte: ${r.file_name}]\n${r.chunk_text}`).join('\n\n');
+        let contestoDocumentale = contextRes.rows
+            .map(r => `[Fonte: ${r.file_name} | Chunk: ${r.id} | Similarità: ${Number(r.similarity).toFixed(4)}]\n${r.chunk_text}`)
+            .join('\n\n');
 
         if (!contestoDocumentale.trim()) {
             contestoDocumentale = 'Nessun documento indicizzato per questo progetto.';
