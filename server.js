@@ -47,7 +47,7 @@ async function initDatabase() {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// Rotta Upload e Chunking file
+// Rotta Upload e Chunking file esistente
 app.post('/api/upload', upload.single('file'), async (req, res) => {
     const { progetto = 'Studio Architettura' } = req.body;
     const file = req.file;
@@ -55,7 +55,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
     try {
         const textContent = file.buffer.toString('utf-8');
-        // Chunking semplice a blocchi di 500 caratteri
         const chunkSize = 500;
         const chunks = [];
         for (let i = 0; i < textContent.length; i += chunkSize) {
@@ -63,7 +62,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         }
 
         for (const chunk of chunks) {
-            // Nota: Qui inseriamo un vettore mock di 1536 zeri o chiamerai l'API di embedding reale
             const dummyVector = Array(1536).fill(0.1); 
             await pool.query(
                 `INSERT INTO document_chunks (progetto, file_name, chunk_text, embedding) VALUES ($1, $2, $3, $4)`,
@@ -75,6 +73,37 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         res.json({ successo: true, chunksCreati: chunks.length });
     } catch (err) {
         console.error("[UPLOAD ERRORE]:", err);
+        res.status(500).json({ errore: err.message });
+    }
+});
+
+// Nuova Rotta per la creazione o l'append di un documento generato dall'IA
+app.post('/api/salva-documento', async (req, res) => {
+    const { progetto, fileName, contenuto, modalita = 'nuovo' } = req.body;
+    if (!progetto || !fileName || !contenuto) {
+        return res.status(400).json({ errore: "Parametri mancanti (progetto, fileName, contenuto)." });
+    }
+
+    try {
+        // Se la modalità è 'nuovo', potremmo opzionalmente pulire o semplicemente aggiungere un nuovo file
+        const chunkSize = 500;
+        const chunks = [];
+        for (let i = 0; i < contenuto.length; i += chunkSize) {
+            chunks.push(contenuto.substring(i, i + chunkSize));
+        }
+
+        for (const chunk of chunks) {
+            const dummyVector = Array(1536).fill(0.1);
+            await pool.query(
+                `INSERT INTO document_chunks (progetto, file_name, chunk_text, embedding) VALUES ($1, $2, $3, $4)`,
+                [progetto, fileName.endsWith('.txt') ? fileName : `${fileName}.txt`, chunk, `[${dummyVector.join(',')}]`]
+            );
+        }
+
+        console.log(`[DOCUMENTO CREATO] ${fileName} salvato con successo per il progetto ${progetto}.`);
+        res.json({ successo: true, chunksCreati: chunks.length });
+    } catch (err) {
+        console.error("[ERRORE SALVATAGGIO DOC]:", err);
         res.status(500).json({ errore: err.message });
     }
 });
@@ -97,7 +126,6 @@ app.post('/api/chat', async (req, res) => {
         let memRes = await pool.query('SELECT memoria_testo FROM user_memories WHERE user_id = $1', [sessionKey]);
         let memoriaAttuale = memRes.rows[0]?.memoria_testo || "Nessuna informazione registrata.";
 
-        // Ricerca vettoriale simulata o su pgvector
         const contextRes = await pool.query(
             `SELECT file_name, chunk_text FROM document_chunks WHERE progetto = $1 ORDER BY id DESC LIMIT 3`,
             [progetto]
@@ -105,7 +133,10 @@ app.post('/api/chat', async (req, res) => {
         let contestoDocumentale = contextRes.rows.map(r => `[Fonte: ${r.file_name}]\n${r.chunk_text}`).join('\n\n');
 
         const messages = [
-            { role: "system", content: "Sei Cervelletto Pro. Usa la memoria e i documenti allegati per rispondere." },
+            { 
+                role: "system", 
+                content: "Sei Cervelletto Pro. Usa la memoria e i documenti allegati per rispondere. Se nella conversazione emerge un contenuto strutturato rilevante che merita di essere salvato o aggiunto a un documento, includi chiaramente una sezione JSON nascosta o formattata nel testo con la struttura: ```json-doc {\"fileName\": \"nome_file.txt\", \"contenuto\": \"...\"} ```." 
+            },
             { role: "system", content: `MEMORIA GLOBALE:\n${memoriaAttuale}` },
             { role: "system", content: `ESTRATTI DOCUMENTALI PERTINENTI:\n${contestoDocumentale}` },
             { role: "user", content: messaggio }
