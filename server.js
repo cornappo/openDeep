@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'pg';
 import multer from 'multer';
+import pdfParse from 'pdf-parse';
 
 const { Pool } = pkg;
 const __filename = fileURLToPath(import.meta.url);
@@ -47,14 +48,25 @@ async function initDatabase() {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// Rotta Upload e Chunking file esistente (con rimozione byte nulli 0x00)
 app.post('/api/upload', upload.single('file'), async (req, res) => {
     const { progetto = 'Studio Architettura' } = req.body;
     const file = req.file;
     if (!file) return res.status(400).json({ errore: "Nessun file caricato." });
 
     try {
-        const textContent = file.buffer.toString('utf-8').replace(/\0/g, '');
+        let textContent = "";
+        const filenameLower = file.originalname.toLowerCase();
+
+        if (filenameLower.endsWith('.pdf')) {
+            const pdfData = await pdfParse(file.buffer);
+            textContent = pdfData.text;
+            if (!textContent || textContent.trim().length === 0) {
+                throw new Error("Il file PDF risulta privo di un layer di testo estraibile nativamente (scansione raster). È richiesto l'intervento di una pipeline OCR.");
+            }
+        } else {
+            textContent = file.buffer.toString('utf-8');
+        }
+
         const chunkSize = 500;
         const chunks = [];
         for (let i = 0; i < textContent.length; i += chunkSize) {
@@ -77,7 +89,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     }
 });
 
-// Nuova Rotta per la creazione o l'append di un documento generato dall'IA
 app.post('/api/salva-documento', async (req, res) => {
     const { progetto, fileName, contenuto, modalita = 'nuovo' } = req.body;
     if (!progetto || !fileName || !contenuto) {
@@ -85,11 +96,10 @@ app.post('/api/salva-documento', async (req, res) => {
     }
 
     try {
-        const textCleaned = contenuto.replace(/\0/g, '');
         const chunkSize = 500;
         const chunks = [];
-        for (let i = 0; i < textCleaned.length; i += chunkSize) {
-            chunks.push(textCleaned.substring(i, i + chunkSize));
+        for (let i = 0; i < contenuto.length; i += chunkSize) {
+            chunks.push(contenuto.substring(i, i + chunkSize));
         }
 
         for (const chunk of chunks) {
