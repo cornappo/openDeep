@@ -13,6 +13,10 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const EMBEDDING_DIMENSION = 1536;
 
+function sanitizeTextForStorage(inputText = '') {
+    return String(inputText || '').replace(/\u0000/g, ' ').replace(/\x00/g, ' ');
+}
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -38,7 +42,7 @@ function buildFallbackEmbedding(inputText = '') {
 }
 
 async function generateEmbedding(text) {
-    const cleanText = String(text || '').trim();
+    const cleanText = sanitizeTextForStorage(text).trim();
     if (!cleanText) return buildFallbackEmbedding('');
 
     if (!process.env.DEEPSEEK_API_KEY) {
@@ -114,12 +118,12 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
         if (filenameLower.endsWith('.pdf')) {
             const pdfData = await pdfParse(file.buffer);
-            textContent = pdfData.text;
+            textContent = sanitizeTextForStorage(pdfData.text);
             if (!textContent || textContent.trim().length === 0) {
                 throw new Error("Il file PDF risulta privo di un layer di testo estraibile nativamente (scansione raster). È richiesto l'intervento di una pipeline OCR.");
             }
         } else {
-            textContent = file.buffer.toString('utf-8');
+            textContent = sanitizeTextForStorage(file.buffer.toString('utf-8'));
         }
 
         const chunkSize = 500;
@@ -151,10 +155,11 @@ app.post('/api/salva-documento', async (req, res) => {
     }
 
     try {
+        const safeContenuto = sanitizeTextForStorage(contenuto);
         const chunkSize = 500;
         const chunks = [];
-        for (let i = 0; i < contenuto.length; i += chunkSize) {
-            chunks.push(contenuto.substring(i, i + chunkSize));
+        for (let i = 0; i < safeContenuto.length; i += chunkSize) {
+            chunks.push(safeContenuto.substring(i, i + chunkSize));
         }
 
         for (const chunk of chunks) {
