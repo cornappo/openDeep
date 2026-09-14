@@ -197,10 +197,14 @@ app.post('/api/chat', async (req, res) => {
         let memoriaAttuale = memRes.rows[0]?.memoria_testo || "Nessuna informazione registrata.";
 
         const contextRes = await pool.query(
-            `SELECT file_name, chunk_text FROM document_chunks WHERE progetto = $1 ORDER BY id DESC LIMIT 3`,
+            `SELECT file_name, chunk_text FROM document_chunks WHERE progetto = $1 ORDER BY id ASC`,
             [progetto]
         );
         let contestoDocumentale = contextRes.rows.map(r => `[Fonte: ${r.file_name}]\n${r.chunk_text}`).join('\n\n');
+
+        if (!contestoDocumentale.trim()) {
+            contestoDocumentale = 'Nessun documento indicizzato per questo progetto.';
+        }
 
         const messages = [
             { 
