@@ -15,17 +15,18 @@ const upload = multer({ storage: multer.memoryStorage() });
 const EMBEDDING_DIMENSION = 1536;
 const EMBEDDING_PROVIDER = 'alibaba';
 
-// URL ufficiale Alibaba/Maas
+// URL ufficiale Alibaba/Maas (spazio ws-756pfhanyfvqhdkw)
 const CUSTOM_API_BASE = 'https://ws-756pfhanyfvqhdkw.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1';
 const CHAT_BASE_URL = CUSTOM_API_BASE;
 
-// Chiave API ufficiale
-const DEFAULT_API_KEY = 'sk-ws-H.DHLXEEH.ol2X.MEUCIAX18p9Zm-acQclxyq97FXejj9GiOp-gN-CWYlNSwSqtAiEArRH6oR7LvnadThvdTOwX6JO3IQORikMNNMWZoT5fIUE';
-const CHAT_API_KEY = process.env.qwenTextEmbedding || process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY || DEFAULT_API_KEY;
+// CHIAVE FISSA (NO PROCESS.ENV)
+const HARDCODED_API_KEY = 'sk-ws-H.DHLXEEH.ol2X.MEUCIAX18p9Zm-acQclxyq97FXejj9GiOp-gN-CWYlNSwSqtAiEArRH6oR7LvnadThvdTOwX6JO3IQORikMNNMWZoT5fIUE';
+
+const CHAT_API_KEY = HARDCODED_API_KEY;
 const CHAT_MODEL = 'deepseek-chat';
 
 const EMBEDDING_BASE_URL = CUSTOM_API_BASE;
-const EMBEDDING_API_KEY = CHAT_API_KEY;
+const EMBEDDING_API_KEY = HARDCODED_API_KEY;
 const EMBEDDING_MODEL = 'text-embedding-v3';
 
 function sanitizeTextForStorage(inputText = '') {
@@ -35,6 +36,7 @@ function sanitizeTextForStorage(inputText = '') {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Il database PostgreSQL usa la connessione specificata (unica env utilizzata)
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
@@ -56,12 +58,6 @@ async function generateEmbedding(text) {
     const cleanText = sanitizeTextForStorage(text).trim();
     if (!cleanText) throw new Error('Impossibile creare un embedding per testo vuoto.');
 
-    const apiKey = EMBEDDING_API_KEY || CHAT_API_KEY;
-    if (!apiKey) {
-        throw new Error('Nessuna API key configurata per gli embedding.');
-    }
-
-    // Payload standard OpenAI/Alibaba compatible per text-embedding-v3
     const payload = {
         model: EMBEDDING_MODEL,
         input: cleanText
@@ -69,12 +65,13 @@ async function generateEmbedding(text) {
 
     const response = await fetch(buildApiUrl(EMBEDDING_BASE_URL, '/embeddings'), {
         method: 'POST',
-        headers: buildAuthHeaders(apiKey),
+        headers: buildAuthHeaders(EMBEDDING_API_KEY),
         body: JSON.stringify(payload)
     });
 
     const data = await response.json();
     if (!response.ok) {
+        console.error("[ERRORE EMBEDDING API DETTAGLIATO]:", JSON.stringify(data, null, 2));
         throw new Error(data?.error?.message || data?.message || `Errore embeddings HTTP ${response.status}`);
     }
 
@@ -240,11 +237,10 @@ app.post('/api/chat', async (req, res) => {
         ];
 
         const startTime = Date.now();
-        const apiKey = CHAT_API_KEY;
 
         const aiResponse = await fetch(buildApiUrl(CHAT_BASE_URL, '/chat/completions'), {
             method: 'POST',
-            headers: buildAuthHeaders(apiKey),
+            headers: buildAuthHeaders(CHAT_API_KEY),
             body: JSON.stringify({ model: CHAT_MODEL, messages, temperature: 0.3 })
         });
         const aiData = await aiResponse.json();
