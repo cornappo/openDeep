@@ -5,20 +5,27 @@ import pkg from 'pg';
 import multer from 'multer';
 import pdfParse from 'pdf-parse';
 
-const { Pool } = pkg
+const { Pool } = pkg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
+
 const EMBEDDING_DIMENSION = 1536;
 const EMBEDDING_PROVIDER = 'alibaba';
-const CUSTOM_API_BASE = 'https://ws-a4fw98r6kybzg4uu.cn-beijing.maas.aliyuncs.com/compatible-mode/v1';
+
+// URL corretto estratto dalle credenziali ufficiali
+const CUSTOM_API_BASE = 'https://ws-756pfhanyfvqhdkw.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1';
 const CHAT_BASE_URL = CUSTOM_API_BASE;
-const CHAT_API_KEY = process.env.qwenTextEmbedding || process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY;
+
+// Chiave API inserita direttamente o tramite variabile d'ambiente
+const DEFAULT_API_KEY = 'sk-ws-H.DHLXEEH.ol2X.MEUCIAX18p9Zm-acQclxyq97FXejj9GiOp-gN-CWYlNSwSqtAiEArRH6oR7LvnadThvdTOwX6JO3IQORikMNNMWZoT5fIUE';
+const CHAT_API_KEY = process.env.qwenTextEmbedding || process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY || DEFAULT_API_KEY;
 const CHAT_MODEL = 'deepseek-chat';
+
 const EMBEDDING_BASE_URL = CUSTOM_API_BASE;
-const EMBEDDING_API_KEY = process.env.qwenTextEmbedding || process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY;
+const EMBEDDING_API_KEY = CHAT_API_KEY;
 const EMBEDDING_MODEL = 'text-embedding-v3';
 
 function sanitizeTextForStorage(inputText = '') {
@@ -41,8 +48,9 @@ function buildAuthHeaders(apiKey) {
     return {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
+        'API-Key': apiKey,
         'X-API-Key': apiKey,
-        'API-Key': apiKey
+        'api-key': apiKey
     };
 }
 
@@ -64,7 +72,8 @@ async function generateEmbedding(text) {
                     content: { parts: [{ text: cleanText }] },
                     outputDimensionality: EMBEDDING_DIMENSION
                 })
-            });
+            }
+        );
 
         const data = await response.json();
         if (!response.ok) {
@@ -81,7 +90,7 @@ async function generateEmbedding(text) {
 
     const apiKey = EMBEDDING_API_KEY || CHAT_API_KEY;
     if (!apiKey) {
-        throw new Error('Nessuna API key configurata per gli embedding. Imposta qwenTextEmbedding.');
+        throw new Error('Nessuna API key configurata per gli embedding.');
     }
 
     const embedCandidates = [
@@ -173,7 +182,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
             const pdfData = await pdfParse(file.buffer);
             textContent = sanitizeTextForStorage(pdfData.text);
             if (!textContent || textContent.trim().length === 0) {
-                throw new Error("Il file PDF risulta privo di un layer di testo estraibile nativamente (scansione raster). È richiesto l'intervento di una pipeline OCR.");
+                throw new Error("Il file PDF risulta privo di un layer di testo estraibile nativamente.");
             }
         } else {
             textContent = sanitizeTextForStorage(file.buffer.toString('utf-8'));
@@ -202,7 +211,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 });
 
 app.post('/api/salva-documento', async (req, res) => {
-    const { progetto, fileName, contenuto, modalita = 'nuovo' } = req.body;
+    const { progetto, fileName, contenuto } = req.body;
     if (!progetto || !fileName || !contenuto) {
         return res.status(400).json({ errore: "Parametri mancanti (progetto, fileName, contenuto)." });
     }
@@ -263,6 +272,7 @@ app.post('/api/chat', async (req, res) => {
              LIMIT 8`,
             [progetto, `[${queryEmbedding.join(',')}]`]
         );
+        
         if (contextRes.rows.length === 0) {
             return res.status(422).json({
                 errore: 'Nessun documento indicizzato per questo progetto. Allega un PDF o un altro file prima di fare una domanda.'
@@ -276,7 +286,7 @@ app.post('/api/chat', async (req, res) => {
         const messages = [
             { 
                 role: "system", 
-                content: "Sei Cervelletto Pro. Usa la memoria e i documenti allegati per rispondere. Se nella conversazione emerge un contenuto strutturato rilevante che merita di essere salvato o aggiunto a un documento, includi chiaramente una sezione JSON nascosta o formattata nel testo con la struttura: ```json-doc {\"fileName\": \"nome_file.txt\", \"contenuto\": \"...\"} ```." 
+                content: "Sei Cervelletto Pro. Usa la memoria e i documenti allegati per rispondere." 
             },
             { role: "system", content: `MEMORIA GLOBALE:\n${memoriaAttuale}` },
             { role: "system", content: `ESTRATTI DOCUMENTALI PERTINENTI:\n${contestoDocumentale}` },
@@ -284,10 +294,7 @@ app.post('/api/chat', async (req, res) => {
         ];
 
         const startTime = Date.now();
-        const apiKey = CHAT_API_KEY || process.env.DEEPSEEK_API_KEY;
-        if (!apiKey) {
-            throw new Error('Nessuna API key configurata per il modello. Imposta AI_API_KEY o DEEPSEEK_API_KEY.');
-        }
+        const apiKey = CHAT_API_KEY;
 
         const aiResponse = await fetch(buildApiUrl(CHAT_BASE_URL, '/chat/completions'), {
             method: 'POST',
