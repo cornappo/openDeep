@@ -5,13 +5,21 @@ import pkg from 'pg';
 import multer from 'multer';
 import pdfParse from 'pdf-parse';
 
-const { Pool } = pkg;
+const { Pool } = pkg
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const EMBEDDING_DIMENSION = 1536;
+const EMBEDDING_PROVIDER = 'alibaba';
+const CUSTOM_API_BASE = 'https://ws-a4fw98r6kybzg4uu.cn-beijing.maas.aliyuncs.com/compatible-mode/v1';
+const CHAT_BASE_URL = CUSTOM_API_BASE;
+const CHAT_API_KEY = process.env.qwenTextEmbedding || process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY;
+const CHAT_MODEL = 'deepseek-chat';
+const EMBEDDING_BASE_URL = CUSTOM_API_BASE;
+const EMBEDDING_API_KEY = process.env.qwenTextEmbedding || process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY;
+const EMBEDDING_MODEL = 'text-embedding-v3';
 
 function sanitizeTextForStorage(inputText = '') {
     return String(inputText || '').replace(/\u0000/g, ' ').replace(/\x00/g, ' ');
@@ -25,35 +33,96 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
+function buildApiUrl(baseUrl, resourcePath) {
+    return `${baseUrl.replace(/\/+$/, '')}/${resourcePath.replace(/^\/+/, '')}`;
+}
+
 async function generateEmbedding(text) {
     const cleanText = sanitizeTextForStorage(text).trim();
     if (!cleanText) throw new Error('Impossibile creare un embedding per testo vuoto.');
-    if (!process.env.GEMINI_API_KEY) {
-        throw new Error('GEMINI_API_KEY non configurata: embedding reale obbligatorio.');
+
+    if (EMBEDDING_PROVIDER === 'gemini') {
+        if (!process.env.GEMINI_API_KEY) {
+            throw new Error('GEMINI_API_KEY non configurata: impossibile usare Gemini per gli embedding.');
+        }
+
+        const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content: { parts: [{ text: cleanText }] },
+                    outputDimensionality: EMBEDDING_DIMENSION
+                })
+            });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data?.error?.message || `Errore Gemini embeddings HTTP ${response.status}`);
+        }
+
+        const embedding = data?.embedding?.values;
+        if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIMENSION) {
+            throw new Error(`Embedding Gemini non valido: attesi ${EMBEDDING_DIMENSION} valori.`);
+        }
+
+        return embedding.map(value => Number(value));
     }
 
-    const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+    const apiKey = EMBEDDING_API_KEY || CHAT_API_KEY;
+    if (!apiKey) {
+        throw new Error('Nessuna API key configurata per gli embedding. Imposta qwenTextEmbedding.');
+    }
+
+    const embedCandidates = [
         {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                content: { parts: [{ text: cleanText }] },
-                outputDimensionality: EMBEDDING_DIMENSION
-            })
-        });
+            name: 'openai-compatible',
+            payload: { model: EMBEDDING_MODEL, input: cleanText },
+            extractor: (data) => data?.data?.[0]?.embedding
+        },
+        {
+            name: 'alibaba-compatible-array',
+            payload: { model: EMBEDDING_MODEL, input: { texts: [cleanText] }, dimensions: EMBEDDING_DIMENSION },
+            extractor: (data) => data?.data?.[0]?.embedding || data?.output?.data?.[0]?.embedding
+        },
+        {
+            name: 'alibaba-compatible-string',
+            payload: { model: EMBEDDING_MODEL, input: [cleanText] },
+            extractor: (data) => data?.data?.[0]?.embedding || data?.output?.data?.[0]?.embedding
+        }
+    ];
 
-    const data = await response.json();
-    if (!response.ok) {
-        throw new Error(data?.error?.message || `Errore Gemini embeddings HTTP ${response.status}`);
+    let lastError = null;
+    for (const candidate of embedCandidates) {
+        try {
+            const response = await fetch(buildApiUrl(EMBEDDING_BASE_URL, '/embeddings'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify(candidate.payload)
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                lastError = new Error(data?.error?.message || data?.message || `Errore embeddings HTTP ${response.status}`);
+                continue;
+            }
+
+            const embedding = candidate.extractor(data);
+            if (Array.isArray(embedding) && embedding.length === EMBEDDING_DIMENSION) {
+                return embedding.map(value => Number(value));
+            }
+
+            lastError = new Error(`Embedding ${candidate.name} non valido: attesi ${EMBEDDING_DIMENSION} valori.`);
+        } catch (err) {
+            lastError = err;
+        }
     }
 
-    const embedding = data?.embedding?.values;
-    if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIMENSION) {
-        throw new Error(`Embedding Gemini non valido: attesi ${EMBEDDING_DIMENSION} valori.`);
-    }
-
-    return embedding.map(value => Number(value));
+    throw lastError || new Error('Nessun formato di embedding supportato risposto dal backend.');
 }
 
 async function initDatabase() {
@@ -183,18 +252,20 @@ app.post('/api/chat', async (req, res) => {
             `SELECT id, file_name, chunk_text,
                     1 - (embedding <=> $2::vector) AS similarity
              FROM document_chunks
-             WHERE progetto = $1
+             WHERE progetto = $1 AND embedding IS NOT NULL
              ORDER BY embedding <=> $2::vector
              LIMIT 8`,
             [progetto, `[${queryEmbedding.join(',')}]`]
         );
-        let contestoDocumentale = contextRes.rows
+        if (contextRes.rows.length === 0) {
+            return res.status(422).json({
+                errore: 'Nessun documento indicizzato per questo progetto. Allega un PDF o un altro file prima di fare una domanda.'
+            });
+        }
+
+        const contestoDocumentale = contextRes.rows
             .map(r => `[Fonte: ${r.file_name} | Chunk: ${r.id} | Similarità: ${Number(r.similarity).toFixed(4)}]\n${r.chunk_text}`)
             .join('\n\n');
-
-        if (!contestoDocumentale.trim()) {
-            contestoDocumentale = 'Nessun documento indicizzato per questo progetto.';
-        }
 
         const messages = [
             { 
@@ -207,17 +278,25 @@ app.post('/api/chat', async (req, res) => {
         ];
 
         const startTime = Date.now();
-        const aiResponse = await fetch("https://api.deepseek.com/chat/completions", {
+        const apiKey = CHAT_API_KEY || process.env.DEEPSEEK_API_KEY;
+        if (!apiKey) {
+            throw new Error('Nessuna API key configurata per il modello. Imposta AI_API_KEY o DEEPSEEK_API_KEY.');
+        }
+
+        const aiResponse = await fetch(buildApiUrl(CHAT_BASE_URL, '/chat/completions'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}` },
-            body: JSON.stringify({ model: "deepseek-chat", messages, temperature: 0.3 })
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: CHAT_MODEL, messages, temperature: 0.3 })
         });
         const aiData = await aiResponse.json();
         const durataMs = Date.now() - startTime;
 
         if (!aiResponse.ok) throw new Error(JSON.stringify(aiData));
 
-        let rispostaIA = aiData.choices[0].message.content;
+        let rispostaIA = aiData?.choices?.[0]?.message?.content || '';
+        if (!rispostaIA) {
+            throw new Error('La risposta del modello non contiene contenuto valido.');
+        }
 
         rispostaIA += "\n\n---\n" +
             "**[SYSTEM LOGS - REAL]**\n" +
