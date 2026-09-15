@@ -15,11 +15,11 @@ const upload = multer({ storage: multer.memoryStorage() });
 const EMBEDDING_DIMENSION = 1536;
 const EMBEDDING_PROVIDER = 'alibaba';
 
-// URL corretto estratto dalle credenziali ufficiali
+// URL ufficiale Alibaba/Maas
 const CUSTOM_API_BASE = 'https://ws-756pfhanyfvqhdkw.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1';
 const CHAT_BASE_URL = CUSTOM_API_BASE;
 
-// Chiave API inserita direttamente o tramite variabile d'ambiente
+// Chiave API ufficiale
 const DEFAULT_API_KEY = 'sk-ws-H.DHLXEEH.ol2X.MEUCIAX18p9Zm-acQclxyq97FXejj9GiOp-gN-CWYlNSwSqtAiEArRH6oR7LvnadThvdTOwX6JO3IQORikMNNMWZoT5fIUE';
 const CHAT_API_KEY = process.env.qwenTextEmbedding || process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY || DEFAULT_API_KEY;
 const CHAT_MODEL = 'deepseek-chat';
@@ -48,9 +48,7 @@ function buildAuthHeaders(apiKey) {
     return {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        'API-Key': apiKey,
-        'X-API-Key': apiKey,
-        'api-key': apiKey
+        'X-DashScope-WorkSpace': 'ws-756pfhanyfvqhdkw'
     };
 }
 
@@ -58,86 +56,34 @@ async function generateEmbedding(text) {
     const cleanText = sanitizeTextForStorage(text).trim();
     if (!cleanText) throw new Error('Impossibile creare un embedding per testo vuoto.');
 
-    if (EMBEDDING_PROVIDER === 'gemini') {
-        if (!process.env.GEMINI_API_KEY) {
-            throw new Error('GEMINI_API_KEY non configurata: impossibile usare Gemini per gli embedding.');
-        }
-
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    content: { parts: [{ text: cleanText }] },
-                    outputDimensionality: EMBEDDING_DIMENSION
-                })
-            }
-        );
-
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data?.error?.message || `Errore Gemini embeddings HTTP ${response.status}`);
-        }
-
-        const embedding = data?.embedding?.values;
-        if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIMENSION) {
-            throw new Error(`Embedding Gemini non valido: attesi ${EMBEDDING_DIMENSION} valori.`);
-        }
-
-        return embedding.map(value => Number(value));
-    }
-
     const apiKey = EMBEDDING_API_KEY || CHAT_API_KEY;
     if (!apiKey) {
         throw new Error('Nessuna API key configurata per gli embedding.');
     }
 
-    const embedCandidates = [
-        {
-            name: 'openai-compatible',
-            payload: { model: EMBEDDING_MODEL, input: cleanText },
-            extractor: (data) => data?.data?.[0]?.embedding
-        },
-        {
-            name: 'alibaba-compatible-array',
-            payload: { model: EMBEDDING_MODEL, input: { texts: [cleanText] }, dimensions: EMBEDDING_DIMENSION },
-            extractor: (data) => data?.data?.[0]?.embedding || data?.output?.data?.[0]?.embedding
-        },
-        {
-            name: 'alibaba-compatible-string',
-            payload: { model: EMBEDDING_MODEL, input: [cleanText] },
-            extractor: (data) => data?.data?.[0]?.embedding || data?.output?.data?.[0]?.embedding
-        }
-    ];
+    // Payload standard OpenAI/Alibaba compatible per text-embedding-v3
+    const payload = {
+        model: EMBEDDING_MODEL,
+        input: cleanText
+    };
 
-    let lastError = null;
-    for (const candidate of embedCandidates) {
-        try {
-            const response = await fetch(buildApiUrl(EMBEDDING_BASE_URL, '/embeddings'), {
-                method: 'POST',
-                headers: buildAuthHeaders(apiKey),
-                body: JSON.stringify(candidate.payload)
-            });
+    const response = await fetch(buildApiUrl(EMBEDDING_BASE_URL, '/embeddings'), {
+        method: 'POST',
+        headers: buildAuthHeaders(apiKey),
+        body: JSON.stringify(payload)
+    });
 
-            const data = await response.json();
-            if (!response.ok) {
-                lastError = new Error(data?.error?.message || data?.message || `Errore embeddings HTTP ${response.status}`);
-                continue;
-            }
-
-            const embedding = candidate.extractor(data);
-            if (Array.isArray(embedding) && embedding.length === EMBEDDING_DIMENSION) {
-                return embedding.map(value => Number(value));
-            }
-
-            lastError = new Error(`Embedding ${candidate.name} non valido: attesi ${EMBEDDING_DIMENSION} valori.`);
-        } catch (err) {
-            lastError = err;
-        }
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data?.error?.message || data?.message || `Errore embeddings HTTP ${response.status}`);
     }
 
-    throw lastError || new Error('Nessun formato di embedding supportato risposto dal backend.');
+    const embedding = data?.data?.[0]?.embedding;
+    if (!Array.isArray(embedding)) {
+        throw new Error('Formato risposta embedding non valido dal backend.');
+    }
+
+    return embedding.map(value => Number(value));
 }
 
 async function initDatabase() {
