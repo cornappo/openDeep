@@ -37,6 +37,15 @@ function buildApiUrl(baseUrl, resourcePath) {
     return `${baseUrl.replace(/\/+$/, '')}/${resourcePath.replace(/^\/+/, '')}`;
 }
 
+function buildAuthHeaders(apiKey) {
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'X-API-Key': apiKey,
+        'API-Key': apiKey
+    };
+}
+
 async function generateEmbedding(text) {
     const cleanText = sanitizeTextForStorage(text).trim();
     if (!cleanText) throw new Error('Impossibile creare un embedding per testo vuoto.');
@@ -98,10 +107,7 @@ async function generateEmbedding(text) {
         try {
             const response = await fetch(buildApiUrl(EMBEDDING_BASE_URL, '/embeddings'), {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
-                },
+                headers: buildAuthHeaders(apiKey),
                 body: JSON.stringify(candidate.payload)
             });
 
@@ -285,7 +291,7 @@ app.post('/api/chat', async (req, res) => {
 
         const aiResponse = await fetch(buildApiUrl(CHAT_BASE_URL, '/chat/completions'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            headers: buildAuthHeaders(apiKey),
             body: JSON.stringify({ model: CHAT_MODEL, messages, temperature: 0.3 })
         });
         const aiData = await aiResponse.json();
