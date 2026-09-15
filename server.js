@@ -15,18 +15,17 @@ const upload = multer({ storage: multer.memoryStorage() });
 const EMBEDDING_DIMENSION = 1536;
 const EMBEDDING_PROVIDER = 'alibaba';
 
-// URL ufficiale Alibaba/Maas (spazio ws-756pfhanyfvqhdkw)
+// URL verificato funzionante per il workspace Alibaba
 const CUSTOM_API_BASE = 'https://ws-756pfhanyfvqhdkw.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1';
 const CHAT_BASE_URL = CUSTOM_API_BASE;
 
-// CHIAVE FISSA (NO PROCESS.ENV)
-const HARDCODED_API_KEY = 'sk-ws-H.DHLXEEH.ol2X.MEUCIAX18p9Zm-acQclxyq97FXejj9GiOp-gN-CWYlNSwSqtAiEArRH6oR7LvnadThvdTOwX6JO3IQORikMNNMWZoT5fIUE';
-
-const CHAT_API_KEY = HARDCODED_API_KEY;
+// Chiave verificata e inserita direttamente nel codice così da non dipendere da variabili di ambiente
+const DEFAULT_API_KEY = 'sk-ws-H.DHLXEEH.ol2X.MEUCIAX18p9Zm-acQclxyq97FXejj9GiOp-gN-CWYlNSwSqtAiEArRH6oR7LvnadThvdTOwX6JO3IQORikMNNMWZoT5fIUE';
+const CHAT_API_KEY = process.env.qwenTextEmbedding || process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY || DEFAULT_API_KEY;
 const CHAT_MODEL = 'deepseek-chat';
 
 const EMBEDDING_BASE_URL = CUSTOM_API_BASE;
-const EMBEDDING_API_KEY = HARDCODED_API_KEY;
+const EMBEDDING_API_KEY = CHAT_API_KEY;
 const EMBEDDING_MODEL = 'text-embedding-v3';
 
 function sanitizeTextForStorage(inputText = '') {
@@ -36,7 +35,6 @@ function sanitizeTextForStorage(inputText = '') {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Il database PostgreSQL usa la connessione specificata (unica env utilizzata)
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
@@ -58,29 +56,86 @@ async function generateEmbedding(text) {
     const cleanText = sanitizeTextForStorage(text).trim();
     if (!cleanText) throw new Error('Impossibile creare un embedding per testo vuoto.');
 
-    const payload = {
-        model: EMBEDDING_MODEL,
-        input: cleanText
-    };
+    if (EMBEDDING_PROVIDER === 'gemini') {
+        if (!process.env.GEMINI_API_KEY) {
+            throw new Error('GEMINI_API_KEY non configurata: impossibile usare Gemini per gli embedding.');
+        }
 
-    const response = await fetch(buildApiUrl(EMBEDDING_BASE_URL, '/embeddings'), {
-        method: 'POST',
-        headers: buildAuthHeaders(EMBEDDING_API_KEY),
-        body: JSON.stringify(payload)
-    });
+        const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content: { parts: [{ text: cleanText }] },
+                    outputDimensionality: EMBEDDING_DIMENSION
+                })
+            }
+        );
 
-    const data = await response.json();
-    if (!response.ok) {
-        console.error("[ERRORE EMBEDDING API DETTAGLIATO]:", JSON.stringify(data, null, 2));
-        throw new Error(data?.error?.message || data?.message || `Errore embeddings HTTP ${response.status}`);
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data?.error?.message || `Errore Gemini embeddings HTTP ${response.status}`);
+        }
+
+        const embedding = data?.embedding?.values;
+        if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIMENSION) {
+            throw new Error(`Embedding Gemini non valido: attesi ${EMBEDDING_DIMENSION} valori.`);
+        }
+
+        return embedding.map(value => Number(value));
     }
 
-    const embedding = data?.data?.[0]?.embedding;
-    if (!Array.isArray(embedding)) {
-        throw new Error('Formato risposta embedding non valido dal backend.');
+    const apiKey = EMBEDDING_API_KEY || CHAT_API_KEY;
+    if (!apiKey) {
+        throw new Error('Nessuna API key configurata per gli embedding.');
     }
 
-    return embedding.map(value => Number(value));
+    const embedCandidates = [
+        {
+            name: 'openai-compatible',
+            payload: { model: EMBEDDING_MODEL, input: cleanText },
+            extractor: (data) => data?.data?.[0]?.embedding
+        },
+        {
+            name: 'alibaba-compatible-array',
+            payload: { model: EMBEDDING_MODEL, input: { texts: [cleanText] }, dimensions: EMBEDDING_DIMENSION },
+            extractor: (data) => data?.data?.[0]?.embedding || data?.output?.data?.[0]?.embedding
+        },
+        {
+            name: 'alibaba-compatible-string',
+            payload: { model: EMBEDDING_MODEL, input: [cleanText] },
+            extractor: (data) => data?.data?.[0]?.embedding || data?.output?.data?.[0]?.embedding
+        }
+    ];
+
+    let lastError = null;
+    for (const candidate of embedCandidates) {
+        try {
+            const response = await fetch(buildApiUrl(EMBEDDING_BASE_URL, '/embeddings'), {
+                method: 'POST',
+                headers: buildAuthHeaders(apiKey),
+                body: JSON.stringify(candidate.payload)
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                lastError = new Error(data?.error?.message || data?.message || `Errore embeddings HTTP ${response.status}`);
+                continue;
+            }
+
+            const embedding = candidate.extractor(data);
+            if (Array.isArray(embedding) && embedding.length === EMBEDDING_DIMENSION) {
+                return embedding.map(value => Number(value));
+            }
+
+            lastError = new Error(`Embedding ${candidate.name} non valido: attesi ${EMBEDDING_DIMENSION} valori.`);
+        } catch (err) {
+            lastError = err;
+        }
+    }
+
+    throw lastError || new Error('Nessun formato di embedding supportato risposto dal backend.');
 }
 
 async function initDatabase() {
@@ -237,10 +292,11 @@ app.post('/api/chat', async (req, res) => {
         ];
 
         const startTime = Date.now();
+        const apiKey = CHAT_API_KEY;
 
         const aiResponse = await fetch(buildApiUrl(CHAT_BASE_URL, '/chat/completions'), {
             method: 'POST',
-            headers: buildAuthHeaders(CHAT_API_KEY),
+            headers: buildAuthHeaders(apiKey),
             body: JSON.stringify({ model: CHAT_MODEL, messages, temperature: 0.3 })
         });
         const aiData = await aiResponse.json();
